@@ -1,0 +1,6 @@
+{
+  "name": "VB Electronics",
+  "description": "Premier electronics store in Dubai offering the latest smartphones, laptops, audio, gaming gear, and tech accessories with same-day UAE delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
