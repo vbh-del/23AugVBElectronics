@@ -9,9 +9,11 @@ import {
   ShieldCheck,
   Truck,
   Sparkles,
-  Tag
+  Tag,
+  Lock
 } from 'lucide-react';
 import { CartItem } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -32,6 +34,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onOpenCheckout,
   onShowToast
 }) => {
+  const { currentUser, userProfile, openAuthModal } = useAuth();
   if (!isOpen) return null;
 
   const [promoInput, setPromoInput] = useState('');
@@ -40,7 +43,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const [fixedDiscount, setFixedDiscount] = useState<number>(0);
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
-  
+
   // Free delivery threshold: 200 AED
   const FREE_DELIVERY_THRESHOLD = 200;
   const amountToFreeDelivery = Math.max(0, FREE_DELIVERY_THRESHOLD - subtotal);
@@ -93,6 +96,19 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   const handleCheckoutClick = () => {
     if (cart.length === 0) return;
+
+    // Checkout Protection: Require customer authentication
+    const isLoggedIn = Boolean(currentUser || userProfile);
+    if (!isLoggedIn) {
+      onShowToast(
+        'Account Required for Checkout',
+        'Please log in or create an account to complete your order.',
+        'info'
+      );
+      openAuthModal('login', 'Please sign in or create an account to proceed to checkout.');
+      return;
+    }
+
     onOpenCheckout(discountAmount, appliedPromo || '');
   };
 
@@ -125,7 +141,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           <button
             id="close-cart-btn"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -175,7 +191,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       </h4>
                       <button
                         onClick={() => onRemoveItem(item.product.id)}
-                        className="text-slate-400 hover:text-rose-500 p-1 transition-colors shrink-0"
+                        className="text-slate-400 hover:text-rose-500 p-1 transition-colors shrink-0 cursor-pointer"
                         title="Remove item"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -193,7 +209,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 overflow-hidden">
                       <button
                         onClick={() => onUpdateQuantity(item.product.id, -1)}
-                        className="px-2 py-1 text-slate-600 hover:bg-slate-200 text-xs font-bold"
+                        className="px-2 py-1 text-slate-600 hover:bg-slate-200 text-xs font-bold cursor-pointer"
                       >
                         <Minus className="w-3 h-3" />
                       </button>
@@ -202,7 +218,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       </span>
                       <button
                         onClick={() => onUpdateQuantity(item.product.id, 1)}
-                        className="px-2 py-1 text-slate-600 hover:bg-slate-200 text-xs font-bold"
+                        className="px-2 py-1 text-slate-600 hover:bg-slate-200 text-xs font-bold cursor-pointer"
                       >
                         <Plus className="w-3 h-3" />
                       </button>
@@ -228,7 +244,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </p>
               <button
                 onClick={onClose}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-sky-600 transition-colors"
+                className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-sky-600 transition-colors cursor-pointer"
               >
                 Browse Electronics
               </button>
@@ -239,7 +255,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         {/* Cart Footer Calculation & Actions */}
         {cart.length > 0 && (
           <div className="p-5 border-t border-slate-200 bg-slate-50 space-y-3.5">
-            
             {/* Promo Code Input Form */}
             <form onSubmit={handleApplyPromo} className="flex gap-2">
               <div className="relative flex-1">
@@ -254,7 +269,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
               <button
                 type="submit"
-                className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-sky-600 transition-colors whitespace-nowrap"
+                className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-sky-600 transition-colors whitespace-nowrap cursor-pointer"
               >
                 Apply
               </button>
@@ -268,7 +283,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </span>
                 <button
                   onClick={removePromo}
-                  className="text-xs text-rose-500 hover:text-rose-700 underline font-normal"
+                  className="text-xs text-rose-500 hover:text-rose-700 underline font-normal cursor-pointer"
                 >
                   Remove
                 </button>
@@ -281,7 +296,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 <span>Subtotal ({cart.reduce((a, c) => a + c.quantity, 0)} items)</span>
                 <span className="font-semibold text-slate-900">AED {subtotal.toLocaleString()}</span>
               </div>
-              
+
               {discountAmount > 0 && (
                 <div className="flex justify-between text-emerald-600 font-medium">
                   <span>Special Discount</span>
@@ -313,20 +328,27 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             <button
               id="proceed-checkout-btn"
               onClick={handleCheckoutClick}
-              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-sky-600/30 flex items-center justify-center gap-2 active:scale-95 transition-all"
+              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-sky-600/30 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
             >
-              <span>Proceed to Checkout</span>
-              <ArrowRight className="w-4 h-4" />
+              {!(currentUser || userProfile) ? (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Log in to Proceed to Checkout</span>
+                </>
+              ) : (
+                <>
+                  <span>Proceed to Checkout</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
 
             <div className="text-[10px] text-center text-slate-400 flex items-center justify-center gap-1.5">
               <ShieldCheck className="w-3 h-3 text-emerald-500" />
               <span>Official UAE Spec Guarantee • 14-Day Free Returns</span>
             </div>
-
           </div>
         )}
-
       </div>
     </div>
   );

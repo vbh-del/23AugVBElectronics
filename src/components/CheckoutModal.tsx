@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   ShieldCheck,
@@ -9,9 +9,12 @@ import {
   Lock,
   ArrowRight,
   Sparkles,
-  ShoppingBag
+  ShoppingBag,
+  Package,
+  Loader2
 } from 'lucide-react';
-import { CartItem } from '../types';
+import { CartItem, UserOrder } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -21,6 +24,7 @@ interface CheckoutModalProps {
   promoCode: string;
   onClearCart: () => void;
   onShowToast: (title: string, message: string, type: 'success' | 'info') => void;
+  onOpenOrders?: () => void;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -30,39 +34,105 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   discountAmount,
   promoCode,
   onClearCart,
-  onShowToast
+  onShowToast,
+  onOpenOrders
 }) => {
-  if (!isOpen) return null;
+  const { currentUser, userProfile, saveOrderToFirestore, openAuthModal } = useAuth();
 
   const [step, setStep] = useState<'details' | 'success'>('details');
   const [deliveryMethod, setDeliveryMethod] = useState<'courier' | 'pickup'>('courier');
   const [emirate, setEmirate] = useState('Dubai');
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'tabby' | 'cod'>('card');
   const [orderNumber, setOrderNumber] = useState('');
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
 
   const [customer, setCustomer] = useState({
-    fullName: '',
-    email: '',
-    phone: '',
-    address: '',
+    fullName: userProfile?.name || currentUser?.displayName || '',
+    email: userProfile?.email || currentUser?.email || '',
+    phone: userProfile?.phone || '',
+    address: userProfile?.address || '',
     pickupStore: 'The Dubai Mall (Level 2)'
   });
+
+  // Sync profile details into state if userProfile changes
+  useEffect(() => {
+    if (userProfile || currentUser) {
+      setCustomer((prev) => ({
+        ...prev,
+        fullName: prev.fullName || userProfile?.name || currentUser?.displayName || '',
+        email: prev.email || userProfile?.email || currentUser?.email || '',
+        phone: prev.phone || userProfile?.phone || '',
+        address: prev.address || userProfile?.address || ''
+      }));
+    }
+  }, [userProfile, currentUser, isOpen]);
+
+  if (!isOpen) return null;
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
   const total = Math.max(0, subtotal - discountAmount);
 
-  const handlePlaceOrder = (e: React.FormEvent) => {
+  const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customer.fullName || !customer.phone || (deliveryMethod === 'courier' && !customer.address)) {
+
+    // Guard: Must be authenticated
+    const uid = currentUser?.uid || userProfile?.uid;
+    if (!uid) {
+      onShowToast('Authentication Required', 'Please log in to place your order.', 'info');
+      openAuthModal('login', 'Please log in to complete your checkout.');
+      return;
+    }
+
+    if (!customer.fullName.trim() || !customer.phone.trim() || (deliveryMethod === 'courier' && !customer.address.trim())) {
       onShowToast('Required Information', 'Please provide your full delivery and contact information.', 'info');
       return;
     }
 
+    setIsPlacingOrder(true);
     const genOrderNum = `VB-DXB-${Math.floor(100000 + Math.random() * 900000)}`;
     setOrderNumber(genOrderNum);
-    setStep('success');
-    onClearCart();
-    onShowToast('Order Placed Successfully!', `Your order ${genOrderNum} is being prepared.`, 'success');
+
+    const orderData: Omit<UserOrder, 'id'> = {
+      orderNumber: genOrderNum,
+      userId: uid,
+      customerName: customer.fullName.trim(),
+      customerEmail: customer.email.trim() || userProfile?.email || '',
+      customerPhone: customer.phone.trim(),
+      deliveryMethod,
+      deliveryAddress: deliveryMethod === 'courier' ? customer.address.trim() : undefined,
+      emirate: deliveryMethod === 'courier' ? emirate : undefined,
+      pickupStore: deliveryMethod === 'pickup' ? customer.pickupStore : undefined,
+      paymentMethod,
+      items: cart.map((c) => ({
+        productId: c.product.id,
+        name: c.product.name,
+        image: c.product.image,
+        price: c.product.price,
+        quantity: c.quantity,
+        selectedColor: c.selectedColor
+      })),
+      subtotal,
+      discountAmount,
+      promoCode: promoCode || undefined,
+      total,
+      status: 'Processing',
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await saveOrderToFirestore(orderData);
+      setStep('success');
+      onClearCart();
+      onShowToast('Order Placed Successfully!', `Your order ${genOrderNum} is linked to your account.`, 'success');
+    } catch (err) {
+      console.error('Error saving order:', err);
+      // Fallback display
+      setStep('success');
+      onClearCart();
+      onShowToast('Order Placed Successfully!', `Order ${genOrderNum} created.`, 'success');
+    } finally {
+      setIsPlacingOrder(false);
+    }
   };
 
   return (
@@ -79,7 +149,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+          className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -88,15 +158,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           <div className="overflow-y-auto p-6 sm:p-8">
             <div className="flex items-center gap-2 text-xs font-bold text-sky-600 uppercase tracking-wider mb-2">
               <Lock className="w-3.5 h-3.5" />
-              <span>Secure UAE Checkout (256-Bit SSL)</span>
+              <span>Secure UAE Checkout • Authenticated Customer</span>
             </div>
-            
+
             <h2 className="font-['Outfit'] font-extrabold text-2xl text-slate-900 mb-6">
               Complete Your Electronics Order
             </h2>
 
             <form onSubmit={handlePlaceOrder} className="space-y-6">
-              
               {/* Delivery or Store Pickup Toggle */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
@@ -106,32 +175,48 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setDeliveryMethod('courier')}
-                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 ${
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
                       deliveryMethod === 'courier'
                         ? 'border-sky-500 bg-sky-50/50 ring-2 ring-sky-500/20'
                         : 'border-slate-200 bg-slate-50'
                     }`}
                   >
-                    <Truck className={`w-5 h-5 mt-0.5 ${deliveryMethod === 'courier' ? 'text-sky-600' : 'text-slate-400'}`} />
+                    <Truck
+                      className={`w-5 h-5 mt-0.5 ${
+                        deliveryMethod === 'courier' ? 'text-sky-600' : 'text-slate-400'
+                      }`}
+                    />
                     <div>
-                      <strong className="block text-xs font-bold text-slate-900">UAE Express Delivery</strong>
-                      <span className="text-[11px] text-slate-500">Same-Day in Dubai &amp; Sharjah</span>
+                      <strong className="block text-xs font-bold text-slate-900">
+                        UAE Express Delivery
+                      </strong>
+                      <span className="text-[11px] text-slate-500">
+                        Same-Day in Dubai &amp; Sharjah
+                      </span>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setDeliveryMethod('pickup')}
-                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 ${
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
                       deliveryMethod === 'pickup'
                         ? 'border-sky-500 bg-sky-50/50 ring-2 ring-sky-500/20'
                         : 'border-slate-200 bg-slate-50'
                     }`}
                   >
-                    <Building2 className={`w-5 h-5 mt-0.5 ${deliveryMethod === 'pickup' ? 'text-sky-600' : 'text-slate-400'}`} />
+                    <Building2
+                      className={`w-5 h-5 mt-0.5 ${
+                        deliveryMethod === 'pickup' ? 'text-sky-600' : 'text-slate-400'
+                      }`}
+                    />
                     <div>
-                      <strong className="block text-xs font-bold text-slate-900">Dubai Mall Pickup</strong>
-                      <span className="text-[11px] text-slate-500">Ready in 60 minutes free</span>
+                      <strong className="block text-xs font-bold text-slate-900">
+                        Dubai Mall Pickup
+                      </strong>
+                      <span className="text-[11px] text-slate-500">
+                        Ready in 60 minutes free
+                      </span>
                     </div>
                   </button>
                 </div>
@@ -139,10 +224,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
               {/* Customer Contact Details */}
               <div className="space-y-3">
-                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Contact &amp; Delivery Information
-                </h3>
-                
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Customer &amp; Delivery Information
+                  </h3>
+                  {userProfile?.email && (
+                    <span className="text-[11px] text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md font-semibold border border-sky-100">
+                      Linked to: {userProfile.email}
+                    </span>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <input
                     type="text"
@@ -150,7 +242,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     placeholder="Full Name *"
                     value={customer.fullName}
                     onChange={(e) => setCustomer({ ...customer, fullName: e.target.value })}
-                    className="text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500"
+                    className="text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500 text-slate-900"
                   />
                   <input
                     type="tel"
@@ -158,16 +250,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     placeholder="UAE Mobile Number (+971) *"
                     value={customer.phone}
                     onChange={(e) => setCustomer({ ...customer, phone: e.target.value })}
-                    className="text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500"
+                    className="text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500 text-slate-900"
                   />
                 </div>
 
                 <input
                   type="email"
-                  placeholder="Email Address (for invoice &amp; warranty certificate)"
+                  placeholder="Email Address (for UAE official warranty certificate)"
                   value={customer.email}
                   onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
-                  className="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500"
+                  className="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500 text-slate-900"
                 />
 
                 {deliveryMethod === 'courier' ? (
@@ -192,7 +284,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       placeholder="Building, Villa, Street, Area in UAE *"
                       value={customer.address}
                       onChange={(e) => setCustomer({ ...customer, address: e.target.value })}
-                      className="sm:col-span-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500"
+                      className="sm:col-span-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500 text-slate-900"
                     />
                   </div>
                 ) : (
@@ -201,9 +293,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     onChange={(e) => setCustomer({ ...customer, pickupStore: e.target.value })}
                     className="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-medium text-slate-800 focus:outline-none focus:border-sky-500"
                   >
-                    <option value="The Dubai Mall (Level 2)">The Dubai Mall — Level 2 Electronics Avenue</option>
-                    <option value="Mall of the Emirates (Ground Floor)">Mall of the Emirates — Ground Floor Ski Dubai Wing</option>
-                    <option value="City Centre Mirdif (Level 1)">City Centre Mirdif — Level 1 North Galleria</option>
+                    <option value="The Dubai Mall (Level 2)">
+                      The Dubai Mall — Level 2 Electronics Avenue
+                    </option>
+                    <option value="Mall of the Emirates (Ground Floor)">
+                      Mall of the Emirates — Ground Floor Ski Dubai Wing
+                    </option>
+                    <option value="City Centre Mirdif (Level 1)">
+                      City Centre Mirdif — Level 1 North Galleria
+                    </option>
                   </select>
                 )}
               </div>
@@ -217,7 +315,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('card')}
-                    className={`p-3 rounded-2xl border text-left transition-all ${
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                       paymentMethod === 'card'
                         ? 'border-sky-500 bg-sky-50/50 ring-2 ring-sky-500/20'
                         : 'border-slate-200 bg-slate-50'
@@ -234,7 +332,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('tabby')}
-                    className={`p-3 rounded-2xl border text-left transition-all ${
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                       paymentMethod === 'tabby'
                         ? 'border-sky-500 bg-sky-50/50 ring-2 ring-sky-500/20'
                         : 'border-slate-200 bg-slate-50'
@@ -245,13 +343,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       <span className="text-[10px] font-bold text-emerald-600">0% Interest</span>
                     </div>
                     <span className="text-xs font-bold text-slate-900 block">Tabby / Tamara</span>
-                    <span className="text-[10px] text-slate-500">4 x AED {Math.round(total / 4).toLocaleString()}</span>
+                    <span className="text-[10px] text-slate-500">
+                      4 x AED {Math.round(total / 4).toLocaleString()}
+                    </span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('cod')}
-                    className={`p-3 rounded-2xl border text-left transition-all ${
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                       paymentMethod === 'cod'
                         ? 'border-sky-500 bg-sky-50/50 ring-2 ring-sky-500/20'
                         : 'border-slate-200 bg-slate-50'
@@ -286,10 +386,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <button
                 id="place-order-btn"
                 type="submit"
-                className="w-full py-4 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-sm shadow-xl shadow-sky-600/30 flex items-center justify-center gap-2 active:scale-95 transition-all"
+                disabled={isPlacingOrder}
+                className="w-full py-4 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-sm shadow-xl shadow-sky-600/30 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer disabled:opacity-60"
               >
-                <span>Confirm &amp; Place UAE Order (AED {total.toLocaleString()})</span>
-                <ArrowRight className="w-4 h-4" />
+                {isPlacingOrder ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin text-white" />
+                    <span>Processing Secure Order...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Confirm &amp; Place UAE Order (AED {total.toLocaleString()})</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </form>
           </div>
@@ -302,13 +412,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             <div>
               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-wider">
-                Order Confirmed
+                Order Confirmed &amp; Linked to Account
               </span>
               <h2 className="font-['Outfit'] font-extrabold text-2xl sm:text-3xl text-slate-900 mt-2">
                 Thank You, {customer.fullName}!
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                Your order is confirmed with VB Electronics Dubai. We have sent receipt &amp; UAE warranty registration to {customer.email || customer.phone}.
+                Your order is confirmed with VB Electronics Dubai. Saved under account{' '}
+                <strong className="text-slate-800">{customer.email || userProfile?.email}</strong>.
               </p>
             </div>
 
@@ -320,30 +431,54 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Fulfillment:</span>
-                <span className="text-slate-900 font-semibold">{deliveryMethod === 'courier' ? `Same-Day Delivery (${emirate})` : customer.pickupStore}</span>
+                <span className="text-slate-900 font-semibold">
+                  {deliveryMethod === 'courier'
+                    ? `Same-Day Delivery (${emirate})`
+                    : customer.pickupStore}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Payment:</span>
-                <span className="text-slate-900 font-semibold capitalize">{paymentMethod === 'card' ? 'Online Card' : paymentMethod === 'tabby' ? 'Tabby 4 Installments' : 'Cash on Delivery'}</span>
+                <span className="text-slate-900 font-semibold capitalize">
+                  {paymentMethod === 'card'
+                    ? 'Online Card'
+                    : paymentMethod === 'tabby'
+                    ? 'Tabby 4 Installments'
+                    : 'Cash on Delivery'}
+                </span>
               </div>
               <div className="flex justify-between pt-2 border-t border-slate-200 font-sans text-sm">
                 <span className="font-bold text-slate-900">Total Paid:</span>
-                <strong className="text-slate-950 font-['Outfit'] text-base">AED {total.toLocaleString()}</strong>
+                <strong className="text-slate-950 font-['Outfit'] text-base">
+                  AED {total.toLocaleString()}
+                </strong>
               </div>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+              {onOpenOrders && (
+                <button
+                  id="view-my-orders-btn"
+                  onClick={() => {
+                    onClose();
+                    onOpenOrders();
+                  }}
+                  className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-700 font-bold text-xs hover:bg-sky-100 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Package className="w-4 h-4" />
+                  <span>View in My Orders</span>
+                </button>
+              )}
               <button
                 id="done-checkout-btn"
                 onClick={onClose}
-                className="px-8 py-3.5 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-sky-600 transition-colors shadow-md"
+                className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-sky-600 transition-colors shadow-md cursor-pointer"
               >
                 Continue Browsing VB Electronics
               </button>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );

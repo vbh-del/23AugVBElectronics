@@ -83,3 +83,47 @@ export interface FilterState {
   minRating: number;
   sortBy: SortOption;
 }
+
+export interface UserProfile {
+  uid: string;
+  name: string;
+  email: string;
+  joinDate: string;
+  createdAt?: any;
+  photoURL?: string;
+  phone?: string;
+  address?: string;
+}
+
+export interface OrderItem {
+  productId: string;
+  name: string;
+  image: string;
+  price: number;
+  quantity: number;
+  selectedColor?: string;
+}
+
+export interface UserOrder {
+  id: string;
+  orderNumber: string;
+  userId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  deliveryMethod: 'courier' | 'pickup';
+  deliveryAddress?: string;
+  emirate?: string;
+  pickupStore?: string;
+  paymentMethod: 'card' | 'tabby' | 'cod';
+  items: OrderItem[];
+  subtotal: number;
+  discountAmount: number;
+  promoCode?: string;
+  total: number;
+  status: 'Processing' | 'Preparing in Dubai Warehouse' | 'Out for Delivery' | 'Ready for Pickup' | 'Delivered';
+  createdAt: string;
+}
+
+export type AuthModalMode = 'login' | 'signup';
+

@@ -11,9 +11,17 @@ import {
   ShieldCheck,
   Truck,
   ChevronRight,
-  ArrowRight
+  ChevronDown,
+  ArrowRight,
+  User as UserIcon,
+  LogIn,
+  UserPlus,
+  LogOut,
+  Package,
+  Calendar
 } from 'lucide-react';
 import { Product } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 interface NavbarProps {
   activeSection: string;
@@ -21,10 +29,12 @@ interface NavbarProps {
   cartCount: number;
   wishlistCount: number;
   onOpenCart: () => void;
+  onOpenOrders: () => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   onSelectProduct: (product: Product) => void;
   allProducts: Product[];
+  onShowToast?: (title: string, message: string, type: 'success' | 'info' | 'warning') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -33,16 +43,21 @@ export const Navbar: React.FC<NavbarProps> = ({
   cartCount,
   wishlistCount,
   onOpenCart,
+  onOpenOrders,
   searchQuery,
   setSearchQuery,
   onSelectProduct,
-  allProducts
+  allProducts,
+  onShowToast
 }) => {
+  const { currentUser, userProfile, openAuthModal, logOut } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [isBadgePopping, setIsBadgePopping] = useState(false);
   const prevCartCountRef = useRef(cartCount);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+  const userDropdownRef = useRef<HTMLDivElement>(null);
 
   // Trigger smooth pop effect when cart count changes
   useEffect(() => {
@@ -64,30 +79,37 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'contact', label: 'Contact' }
   ];
 
-  // Close search dropdown when clicking outside
+  // Close search dropdown and user menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
         setIsSearchFocused(false);
+      }
+      if (userDropdownRef.current && !userDropdownRef.current.contains(event.target as Node)) {
+        setIsUserDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const searchResults = searchQuery.trim() === ''
-    ? []
-    : allProducts.filter(p =>
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()))
-      ).slice(0, 5);
+  const searchResults =
+    searchQuery.trim() === ''
+      ? []
+      : allProducts
+          .filter(
+            (p) =>
+              p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              p.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              p.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()))
+          )
+          .slice(0, 5);
 
   const handleNavClick = (sectionId: string) => {
     setActiveSection(sectionId);
     setIsMobileMenuOpen(false);
-    
+
     // Smooth scroll to section element
     const element = document.getElementById(sectionId);
     if (element) {
@@ -96,6 +118,19 @@ export const Navbar: React.FC<NavbarProps> = ({
       window.scrollTo({ top: y, behavior: 'smooth' });
     }
   };
+
+  const handleLogoutClick = async () => {
+    try {
+      await logOut();
+      setIsUserDropdownOpen(false);
+      setIsMobileMenuOpen(false);
+      onShowToast?.('Logged Out', 'You have been safely signed out.', 'info');
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  const displayName = userProfile?.name || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Customer';
 
   return (
     <header className="sticky top-0 z-40 w-full shadow-md shadow-sky-900/5">
@@ -135,14 +170,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Main Sticky Navbar */}
       <nav className="bg-sky-50/95 border-b border-sky-200/80 text-slate-900 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-20 gap-4">
-            
+          <div className="flex items-center justify-between h-20 gap-3">
             {/* Logo Section */}
             <div className="flex items-center gap-3 shrink-0">
               <button
                 id="brand-logo-btn"
                 onClick={() => handleNavClick('home')}
-                className="group flex items-center gap-2.5 text-left focus:outline-none"
+                className="group flex items-center gap-2.5 text-left focus:outline-none cursor-pointer"
               >
                 <div className="relative flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-sky-400 via-sky-500 to-blue-600 shadow-md shadow-sky-400/30 group-hover:shadow-sky-400/50 group-hover:scale-105 transition-all duration-300">
                   <Zap className="w-6 h-6 text-white fill-white drop-shadow-[0_0_6px_rgba(255,255,255,0.8)]" />
@@ -165,7 +199,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {/* Desktop Navigation Links */}
-            <div className="hidden lg:flex items-center gap-1 xl:gap-2">
+            <div className="hidden lg:flex items-center gap-1">
               {navLinks.map((link) => {
                 const isActive = activeSection === link.id;
                 return (
@@ -173,7 +207,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     key={link.id}
                     id={`nav-link-${link.id}`}
                     onClick={() => handleNavClick(link.id)}
-                    className={`relative px-3.5 py-2 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                    className={`relative px-3 py-2 rounded-xl text-xs xl:text-sm font-semibold transition-all duration-200 cursor-pointer ${
                       isActive
                         ? 'text-sky-900 bg-sky-200/80 shadow-sm border border-sky-300'
                         : 'text-slate-700 hover:text-sky-900 hover:bg-sky-100/70'
@@ -194,18 +228,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {/* Search Bar with Live Suggestions Dropdown */}
-            <div ref={searchContainerRef} className="hidden md:block relative flex-1 max-w-md mx-2">
+            <div ref={searchContainerRef} className="hidden md:block relative flex-1 max-w-xs lg:max-w-sm xl:max-w-md mx-2">
               <div className="relative">
                 <input
                   id="navbar-search-input"
                   type="text"
-                  placeholder="Search iPhones, MacBooks, PS5, OLED TVs, Audio..."
+                  placeholder="Search iPhones, MacBooks, PS5..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onFocus={() => setIsSearchFocused(true)}
-                  className="w-full bg-white text-slate-900 placeholder-slate-400 text-xs sm:text-sm rounded-xl pl-10 pr-9 py-2.5 border border-sky-200 focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-300/40 shadow-sm transition-all"
+                  className="w-full bg-white text-slate-900 placeholder-slate-400 text-xs rounded-xl pl-9 pr-8 py-2.5 border border-sky-200 focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-300/40 shadow-sm transition-all"
                 />
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-sky-600" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sky-600" />
                 {searchQuery && (
                   <button
                     id="clear-search-btn"
@@ -238,7 +272,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                             setIsSearchFocused(false);
                             setSearchQuery('');
                           }}
-                          className="w-full p-2.5 flex items-center gap-3 hover:bg-sky-50 text-left transition-colors group"
+                          className="w-full p-2.5 flex items-center gap-3 hover:bg-sky-50 text-left transition-colors group cursor-pointer"
                         >
                           <img
                             src={prod.image}
@@ -279,7 +313,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         handleNavClick('shop');
                         setIsSearchFocused(false);
                       }}
-                      className="text-xs text-sky-700 hover:text-sky-900 font-bold inline-flex items-center gap-1"
+                      className="text-xs text-sky-700 hover:text-sky-900 font-bold inline-flex items-center gap-1 cursor-pointer"
                     >
                       View all in Shop catalog <ArrowRight className="w-3 h-3" />
                     </button>
@@ -288,16 +322,113 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
-            {/* Right Action Icons: Cart & Mobile Menu */}
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              {/* Wishlist Quick Counter (Optional Delight) */}
+            {/* Right Action Icons: Customer Auth, Wishlist, Cart & Mobile Menu */}
+            <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+              
+              {/* Customer Account Section (Desktop) */}
+              <div ref={userDropdownRef} className="relative hidden md:block">
+                {currentUser || userProfile ? (
+                  <div>
+                    <button
+                      id="navbar-user-btn"
+                      onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-sky-200/80 hover:border-sky-400 text-slate-900 shadow-sm transition-all text-xs font-semibold cursor-pointer group"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-sky-500 to-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase shadow-sm">
+                        {displayName.charAt(0)}
+                      </div>
+                      <div className="text-left hidden lg:block">
+                        <span className="block text-[10px] text-slate-400 font-medium leading-none">
+                          Account
+                        </span>
+                        <span className="font-bold text-slate-800 text-xs truncate max-w-[90px] block leading-tight">
+                          {displayName.split(' ')[0]}
+                        </span>
+                      </div>
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600 transition-transform" />
+                    </button>
+
+                    {/* Logged-In User Dropdown Menu */}
+                    {isUserDropdownOpen && (
+                      <div
+                        id="navbar-user-dropdown"
+                        className="absolute right-0 top-full mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                      >
+                        <div className="p-4 bg-sky-50/80 border-b border-sky-100">
+                          <p className="text-[11px] font-bold text-sky-800 uppercase tracking-wider">
+                            Signed in as
+                          </p>
+                          <p className="text-sm font-bold text-slate-900 truncate mt-0.5">
+                            {displayName}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {userProfile?.email || currentUser?.email}
+                          </p>
+                          {userProfile?.joinDate && (
+                            <p className="text-[10px] text-sky-700 flex items-center gap-1 mt-1.5 font-medium">
+                              <Calendar className="w-3 h-3" />
+                              <span>Joined {userProfile.joinDate}</span>
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="p-2 space-y-1">
+                          <button
+                            id="user-menu-orders-btn"
+                            onClick={() => {
+                              setIsUserDropdownOpen(false);
+                              onOpenOrders();
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:text-sky-700 hover:bg-sky-50 rounded-xl transition-colors cursor-pointer text-left"
+                          >
+                            <Package className="w-4 h-4 text-sky-600" />
+                            <span>My Orders &amp; Warranties</span>
+                          </button>
+
+                          <button
+                            id="user-menu-logout-btn"
+                            onClick={handleLogoutClick}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer text-left"
+                          >
+                            <LogOut className="w-4 h-4 text-rose-500" />
+                            <span>Log out</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Logged Out Buttons: Sign up & Log in */
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      id="navbar-login-btn"
+                      onClick={() => openAuthModal('login')}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:text-sky-900 hover:bg-sky-100/70 border border-transparent hover:border-sky-200 transition-all cursor-pointer"
+                    >
+                      <LogIn className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Log in</span>
+                    </button>
+
+                    <button
+                      id="navbar-signup-btn"
+                      onClick={() => openAuthModal('signup')}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm shadow-sky-500/25 transition-all cursor-pointer active:scale-95"
+                    >
+                      <UserPlus className="w-3.5 h-3.5 text-white" />
+                      <span>Sign up</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Wishlist Quick Counter */}
               <button
                 id="wishlist-btn"
                 onClick={() => handleNavClick('shop')}
-                className="relative p-2.5 rounded-xl text-slate-700 hover:text-sky-900 hover:bg-sky-100 transition-colors hidden sm:flex items-center justify-center border border-sky-200/60 bg-white/80 shadow-sm"
+                className="relative p-2.5 rounded-xl text-slate-700 hover:text-sky-900 hover:bg-sky-100 transition-colors hidden sm:flex items-center justify-center border border-sky-200/60 bg-white/80 shadow-sm cursor-pointer"
                 title="Wishlist"
               >
-                <Heart className="w-5 h-5 text-slate-600 hover:text-rose-500 transition-colors" />
+                <Heart className="w-4 h-4 text-slate-600 hover:text-rose-500 transition-colors" />
                 {wishlistCount > 0 && (
                   <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center shadow-sm">
                     {wishlistCount}
@@ -309,17 +440,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 id="navbar-cart-btn"
                 onClick={onOpenCart}
-                className={`relative flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white shadow-md shadow-sky-500/25 hover:shadow-sky-500/40 transition-all duration-200 active:scale-95 group cursor-pointer ${
+                className={`relative flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white shadow-md shadow-sky-500/25 hover:shadow-sky-500/40 transition-all duration-200 active:scale-95 group cursor-pointer ${
                   isBadgePopping ? 'scale-105 shadow-sky-400/50 ring-2 ring-sky-400' : ''
                 }`}
                 aria-label="View Shopping Cart"
               >
                 <div className="relative">
-                  <ShoppingCart className="w-5 h-5 text-white transition-transform group-hover:scale-110" />
+                  <ShoppingCart className="w-4 h-4 text-white transition-transform group-hover:scale-110" />
                   {cartCount > 0 && (
                     <span
                       id="navbar-cart-badge"
-                      className={`absolute -top-2.5 -right-2.5 bg-rose-500 text-white text-[11px] font-extrabold rounded-full min-w-[20px] h-[20px] flex items-center justify-center px-1 border-2 border-white shadow-sm transition-all duration-300 ${
+                      className={`absolute -top-2.5 -right-2.5 bg-rose-500 text-white text-[10px] font-extrabold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border-2 border-white shadow-sm transition-all duration-300 ${
                         isBadgePopping ? 'scale-125 bg-rose-600' : 'scale-100'
                       }`}
                     >
@@ -336,17 +467,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 id="mobile-menu-toggle-btn"
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="lg:hidden p-2.5 rounded-xl text-slate-700 hover:text-slate-900 bg-white border border-sky-200 shadow-sm focus:outline-none"
+                className="lg:hidden p-2 rounded-xl text-slate-700 hover:text-slate-900 bg-white border border-sky-200 shadow-sm focus:outline-none cursor-pointer"
                 aria-label="Toggle menu"
               >
                 {isMobileMenuOpen ? (
-                  <X className="w-6 h-6 text-slate-900" />
+                  <X className="w-5 h-5 text-slate-900" />
                 ) : (
-                  <Menu className="w-6 h-6 text-slate-900" />
+                  <Menu className="w-5 h-5 text-slate-900" />
                 )}
               </button>
             </div>
-
           </div>
 
           {/* Mobile Search Bar Row (When on phones) */}
@@ -377,9 +507,72 @@ export const Navbar: React.FC<NavbarProps> = ({
         {isMobileMenuOpen && (
           <div
             id="mobile-menu-drawer"
-            className="lg:hidden bg-white border-t border-sky-200 px-4 pt-3 pb-6 space-y-2 shadow-xl animate-in slide-in-from-top-4 duration-200"
+            className="lg:hidden bg-white border-t border-sky-200 px-4 pt-3 pb-6 space-y-3 shadow-xl animate-in slide-in-from-top-4 duration-200"
           >
-            <div className="grid grid-cols-2 gap-2 mb-3">
+            {/* Customer Account in Mobile Menu */}
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              {currentUser || userProfile ? (
+                <div className="space-y-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-blue-600 text-white flex items-center justify-center font-bold text-sm uppercase shadow-sm">
+                      {displayName.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-slate-900 truncate">{displayName}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{userProfile?.email || currentUser?.email}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        onOpenOrders();
+                      }}
+                      className="py-2 px-3 text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded-xl flex items-center justify-center gap-1.5"
+                    >
+                      <Package className="w-3.5 h-3.5" />
+                      <span>My Orders</span>
+                    </button>
+                    <button
+                      onClick={handleLogoutClick}
+                      className="py-2 px-3 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-center gap-1.5"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Log out</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-800">VB Electronics Account</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        openAuthModal('login');
+                      }}
+                      className="py-2 px-3 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl flex items-center justify-center gap-1.5 hover:bg-sky-50"
+                    >
+                      <LogIn className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Log in</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        openAuthModal('signup');
+                      }}
+                      className="py-2 px-3 text-xs font-bold text-white bg-gradient-to-r from-sky-500 to-blue-600 rounded-xl flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Sign up</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
               {navLinks.map((link) => {
                 const isActive = activeSection === link.id;
                 return (
@@ -387,7 +580,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     key={link.id}
                     id={`mobile-nav-${link.id}`}
                     onClick={() => handleNavClick(link.id)}
-                    className={`flex items-center justify-between p-3 rounded-xl text-left text-sm font-semibold transition-all ${
+                    className={`flex items-center justify-between p-3 rounded-xl text-left text-xs font-semibold transition-all ${
                       isActive
                         ? 'bg-sky-100 text-sky-900 border border-sky-300'
                         : 'bg-slate-50 text-slate-700 hover:bg-sky-50 hover:text-sky-900 border border-slate-200/80'
