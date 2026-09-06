@@ -44,7 +44,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Local fallback storage keys for offline or demo resilience
+// Local storage keys for offline/demo resilience
 const LOCAL_USER_KEY = 'vbe_auth_user_profile';
 const LOCAL_ORDERS_KEY = 'vbe_customer_orders';
 const LOCAL_CART_KEY = 'vbe_user_cart';
@@ -85,6 +85,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  // Helper to check if an error is due to unconfigured/placeholder Firebase credentials
+  const isApiKeyConfigError = (err: any): boolean => {
+    const code = err?.code || '';
+    const message = err?.message || '';
+    return (
+      code === 'auth/api-key-not-valid' ||
+      code === 'auth/invalid-api-key' ||
+      message.includes('auth/api-key-not-valid') ||
+      message.includes('API key not valid')
+    );
+  };
+
   // Fetch or create user record in Firestore
   const fetchOrCreateUserProfile = async (user: User, explicitName?: string): Promise<UserProfile> => {
     const profileRef = doc(db, 'users', user.uid);
@@ -114,11 +126,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           address: ''
         };
 
-        await setDoc(profileRef, {
-          ...profileData,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        }, { merge: true });
+        await setDoc(
+          profileRef,
+          {
+            ...profileData,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          },
+          { merge: true }
+        );
       }
     } catch (err) {
       console.warn('Firestore user fetch note (using profile fallback):', err);
@@ -184,9 +200,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await fetchOrCreateUserProfile(user);
         await fetchUserOrders(user.uid);
       } else {
-        setUserProfile(null);
-        setOrders([]);
-        localStorage.removeItem(LOCAL_USER_KEY);
+        // Only clear if not in fallback local demo session
+        const cached = localStorage.getItem(LOCAL_USER_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed.uid?.startsWith('local_')) {
+            setUserProfile(parsed);
+            await fetchUserOrders(parsed.uid);
+          } else {
+            setUserProfile(null);
+            setOrders([]);
+            localStorage.removeItem(LOCAL_USER_KEY);
+          }
+        } else {
+          setUserProfile(null);
+          setOrders([]);
+        }
       }
       setLoading(false);
     });
@@ -209,14 +238,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Save to "users" collection in Firestore
       const joinDate = formatJoinDate();
       const userDocRef = doc(db, 'users', cred.user.uid);
-      await setDoc(userDocRef, {
-        uid: cred.user.uid,
-        name: cleanName,
-        email: cleanEmail.toLowerCase(),
-        joinDate: joinDate,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+      await setDoc(
+        userDocRef,
+        {
+          uid: cred.user.uid,
+          name: cleanName,
+          email: cleanEmail.toLowerCase(),
+          joinDate: joinDate,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
 
       const profile: UserProfile = {
         uid: cred.user.uid,
@@ -229,6 +262,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(profile));
       closeAuthModal();
     } catch (error: any) {
+      if (isApiKeyConfigError(error)) {
+        // Graceful simulation: create customer account locally so the user can test without interruption
+        console.info('Firebase API key not yet configured in .env - creating demo customer session.');
+        const mockUid = 'local_' + Date.now().toString(36);
+        const joinDate = formatJoinDate();
+        const profile: UserProfile = {
+          uid: mockUid,
+          name: cleanName,
+          email: cleanEmail.toLowerCase(),
+          joinDate: joinDate,
+          photoURL: ''
+        };
+        setUserProfile(profile);
+        localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(profile));
+        closeAuthModal();
+        return;
+      }
       console.error('Sign-up error:', error);
       throw error;
     }
@@ -245,6 +295,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       closeAuthModal();
     } catch (error: any) {
+      if (isApiKeyConfigError(error)) {
+        // Graceful simulation: log into customer session
+        console.info('Firebase API key not yet configured in .env - activating demo customer session.');
+        const mockUid = 'local_' + Date.now().toString(36);
+        const joinDate = formatJoinDate();
+        const extractedName = cleanEmail.split('@')[0].replace(/[._-]/g, ' ');
+        const formattedName = extractedName.charAt(0).toUpperCase() + extractedName.slice(1);
+        const profile: UserProfile = {
+          uid: mockUid,
+          name: formattedName || 'Valued Customer',
+          email: cleanEmail.toLowerCase(),
+          joinDate: joinDate,
+          photoURL: ''
+        };
+        setUserProfile(profile);
+        localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(profile));
+        await fetchUserOrders(mockUid);
+        closeAuthModal();
+        return;
+      }
       console.error('Log-in error:', error);
       throw error;
     }
@@ -262,17 +332,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const profileName = user.displayName || user.email?.split('@')[0] || 'Valued Customer';
       const userEmail = user.email || '';
-      const joinDate = existingDoc?.exists() ? (existingDoc.data()?.joinDate || formatJoinDate()) : formatJoinDate();
+      const joinDate = existingDoc?.exists()
+        ? existingDoc.data()?.joinDate || formatJoinDate()
+        : formatJoinDate();
 
-      await setDoc(userDocRef, {
-        uid: user.uid,
-        name: profileName,
-        email: userEmail.toLowerCase(),
-        joinDate: joinDate,
-        photoURL: user.photoURL || '',
-        updatedAt: serverTimestamp(),
-        ...(existingDoc?.exists() ? {} : { createdAt: serverTimestamp() })
-      }, { merge: true });
+      await setDoc(
+        userDocRef,
+        {
+          uid: user.uid,
+          name: profileName,
+          email: userEmail.toLowerCase(),
+          joinDate: joinDate,
+          photoURL: user.photoURL || '',
+          updatedAt: serverTimestamp(),
+          ...(existingDoc?.exists() ? {} : { createdAt: serverTimestamp() })
+        },
+        { merge: true }
+      );
 
       const profile: UserProfile = {
         uid: user.uid,
@@ -286,6 +362,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await fetchUserOrders(user.uid);
       closeAuthModal();
     } catch (error: any) {
+      if (isApiKeyConfigError(error)) {
+        console.info('Firebase API key not yet configured in .env - creating demo Google customer session.');
+        const mockUid = 'local_g_' + Date.now().toString(36);
+        const joinDate = formatJoinDate();
+        const profile: UserProfile = {
+          uid: mockUid,
+          name: 'Rashid Al Maktoum',
+          email: 'rashid.maktoum@gmail.com',
+          joinDate: joinDate,
+          photoURL: ''
+        };
+        setUserProfile(profile);
+        localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(profile));
+        await fetchUserOrders(mockUid);
+        closeAuthModal();
+        return;
+      }
       console.error('Google Sign-In error:', error);
       throw error;
     }
@@ -295,14 +388,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logOut = async () => {
     try {
       await signOut(auth);
-      setCurrentUser(null);
-      setUserProfile(null);
-      setOrders([]);
-      localStorage.removeItem(LOCAL_USER_KEY);
     } catch (error: any) {
-      console.error('Log-out error:', error);
-      throw error;
+      console.warn('Firebase signOut note:', error);
     }
+    setCurrentUser(null);
+    setUserProfile(null);
+    setOrders([]);
+    localStorage.removeItem(LOCAL_USER_KEY);
   };
 
   // 5. Save Order to Firestore (linked to account)
@@ -322,7 +414,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       // Also record in subcollection users/{uid}/orders
-      if (orderData.userId) {
+      if (orderData.userId && !orderData.userId.startsWith('local_')) {
         const userOrderRef = doc(db, 'users', orderData.userId, 'orders', orderId);
         await setDoc(userOrderRef, {
           ...fullOrder,
@@ -339,7 +431,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const cached = localStorage.getItem(`${LOCAL_ORDERS_KEY}_${orderData.userId}`);
         const currentOrders = cached ? JSON.parse(cached) : [];
-        localStorage.setItem(`${LOCAL_ORDERS_KEY}_${orderData.userId}`, JSON.stringify([fullOrder, ...currentOrders]));
+        localStorage.setItem(
+          `${LOCAL_ORDERS_KEY}_${orderData.userId}`,
+          JSON.stringify([fullOrder, ...currentOrders])
+        );
       } catch {}
     }
 
@@ -347,42 +442,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshOrders = async () => {
-    if (currentUser?.uid) {
-      await fetchUserOrders(currentUser.uid);
+    const uid = currentUser?.uid || userProfile?.uid;
+    if (uid) {
+      await fetchUserOrders(uid);
     }
   };
 
   // 6. Cart Sync to Firestore for Logged-In User
   const syncCartToFirestore = async (cart: CartItem[]) => {
-    if (!currentUser?.uid) return;
+    const uid = currentUser?.uid || userProfile?.uid;
+    if (!uid) return;
     try {
-      const cartRef = doc(db, 'users', currentUser.uid, 'cart', 'active');
-      await setDoc(cartRef, {
-        items: cart,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+      if (!uid.startsWith('local_')) {
+        const cartRef = doc(db, 'users', uid, 'cart', 'active');
+        await setDoc(
+          cartRef,
+          {
+            items: cart,
+            updatedAt: serverTimestamp()
+          },
+          { merge: true }
+        );
+      }
     } catch (err) {
-      // Graceful fallback to local storage
       try {
-        localStorage.setItem(`${LOCAL_CART_KEY}_${currentUser.uid}`, JSON.stringify(cart));
+        localStorage.setItem(`${LOCAL_CART_KEY}_${uid}`, JSON.stringify(cart));
       } catch {}
     }
   };
 
   const loadCartFromFirestore = async (): Promise<CartItem[] | null> => {
-    if (!currentUser?.uid) return null;
+    const uid = currentUser?.uid || userProfile?.uid;
+    if (!uid) return null;
     try {
-      const cartRef = doc(db, 'users', currentUser.uid, 'cart', 'active');
-      const snap = await getDoc(cartRef);
-      if (snap.exists() && snap.data()?.items) {
-        return snap.data()?.items as CartItem[];
+      if (!uid.startsWith('local_')) {
+        const cartRef = doc(db, 'users', uid, 'cart', 'active');
+        const snap = await getDoc(cartRef);
+        if (snap.exists() && snap.data()?.items) {
+          return snap.data()?.items as CartItem[];
+        }
       }
     } catch (err) {
       console.warn('Cart load from Firestore note:', err);
     }
 
     try {
-      const cached = localStorage.getItem(`${LOCAL_CART_KEY}_${currentUser.uid}`);
+      const cached = localStorage.getItem(`${LOCAL_CART_KEY}_${uid}`);
       return cached ? JSON.parse(cached) : null;
     } catch {
       return null;

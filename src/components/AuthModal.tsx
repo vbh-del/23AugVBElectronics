@@ -64,6 +64,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onShowToast }) => {
         return 'Google sign-in popup was closed before completion.';
       case 'auth/popup-blocked':
         return 'Sign-in popup was blocked by your browser. Please allow popups for this site.';
+      case 'auth/api-key-not-valid':
+      case 'auth/invalid-api-key':
+        return 'Firebase API key is unconfigured or invalid. Please add your Firebase credentials to your .env file.';
       case 'auth/too-many-requests':
         return 'Too many unsuccessful attempts. Please try again in a few moments.';
       default:
